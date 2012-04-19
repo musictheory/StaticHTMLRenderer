@@ -33,10 +33,20 @@
 @end
 
 
+@interface WebScriptCallFrame
+- (NSArray  *) scopeChain;
+- (NSString *) functionName;
+- (id) exception;
+@end
+
+
 @implementation StaticRenderer {
     WebView  *_webView;
     NSString *_outputFile;
     id        _options;
+
+    NSMutableDictionary *_sourceIdToLinesMap;
+    NSMutableDictionary *_sourceIdToURLMap;
 }
 
 
@@ -96,6 +106,9 @@
         [_webView setResourceLoadDelegate:self];
         [_webView setPolicyDelegate:self];
         [_webView setUIDelegate:self];
+
+        _sourceIdToLinesMap = [NSMutableDictionary dictionary];
+        _sourceIdToURLMap   = [NSMutableDictionary dictionary];
         
         if ([_webView respondsToSelector:@selector(setScriptDebugDelegate:)]) {
             [(id)_webView setScriptDebugDelegate:self];
@@ -191,13 +204,42 @@
 }
 
 
+- (void)  webView: (WebView *) webView
+   didParseSource: (NSString *) source
+   baseLineNumber: (unsigned) lineNumber
+          fromURL: (NSURL *) url
+         sourceId: (int) sid
+      forWebFrame: (WebFrame *) webFrame
+{
+    NSArray  *lines = [source componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    NSNumber *key   = [NSNumber numberWithInt:sid];
+
+    if (lines) [_sourceIdToLinesMap  setObject:lines  forKey:key];
+    if (url)   [_sourceIdToURLMap    setObject:url    forKey:key];
+}
+
 - (void) webView:(WebView *)webView exceptionWasRaised: (id) frame
                                             hasHandler: (BOOL) hasHandler
                                               sourceId: (intptr_t) sid
                                                   line: (int)lineno
                                            forWebFrame: (WebFrame *) webFrame
 {
-    NSLog(@"Error: JavaScript exception raised: %@", frame);
+    NSNumber *key = [NSNumber numberWithInt:sid];
+    NSURL    *url = [_sourceIdToURLMap objectForKey:key];
+    
+    NSString *functionName = @"";
+    if ([frame respondsToSelector:@selector(functionName)]) {
+        functionName = [frame functionName];
+    }
+    
+    NSArray  *lines = [_sourceIdToLinesMap objectForKey:key];
+    NSString *line  = @"";
+    if (lineno >= 0 && lineno < [lines count]) {
+        line = [lines objectAtIndex:lineno];
+    }
+
+    NSLog(@"Error: JavaScript exception raised\nURL: %@\nFunction: %@\nLine %ld: %@", url, functionName, (long) lineno, line);
+
     CFRunLoopStop(CFRunLoopGetMain());
 }
 
